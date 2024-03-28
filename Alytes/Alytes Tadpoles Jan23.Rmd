@@ -1,0 +1,365 @@
+---
+title: "Alytes Tadpoles Jan23"
+author: "Xav Harrison"
+date: "2023-01-09"
+output:
+  html_document:
+    toc: true
+    toc_depth: 2
+    toc_float: true
+    number_sections: true
+    theme: united
+    
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Setup
+
+## Libraries
+```{r}
+
+# Plotting
+  library(ggplot2)
+  library(RColorBrewer)
+  library(lattice)
+  library(cowplot)
+
+## Modelling
+  library(lme4)
+  library(brms)
+  library(MuMIn)
+  options(na.action="na.fail")
+  #library(coda)
+  #library(MASS)
+  #library(survival)
+
+## Data
+  #library(plyr)
+  library(dplyr)
+  library(knitr)
+  library(kableExtra)
+
+## Parallel Computing for Bayesian Models  
+  options (mc.cores=parallel::detectCores ()) 
+
+```
+
+## Data
+
+```{r}
+  #############################  
+  #     ALYTES TADPOLES
+  #############################  
+  
+  alytestad<-read.csv('alytesM_tadpoles.csv',header=T)
+  head(alytestad)
+  table(alytestad$Species)
+  
+  ###### CLEAN UP DATES
+    alytestad$death_date2<-strptime(alytestad$death_date,format="%d_%m_%Y")
+    alytestad$yday<-strptime(alytestad$death_date,format="%d_%m_%Y")$yday
+    
+  ## ** NEEDS FIRMING UP WITH PROPER DAY 1** ##
+  ## Add Day of Death as Time Since Weigh Date 1
+    alytestad$death_day<- alytestad$yday -   strptime(as.character(unique(alytestad$dose_date_1)),format="%d_%m_%Y")$yday
+    head(alytestad)
+    table(alytestad$death_day)
+    
+  #### Check Value with Missing Deat Cause
+    table(alytestad$death_cause)
+    subset(alytestad,death_cause=="")
+    
+  ### Remove 
+  #alytesmeta2<-subset(alytesmeta,death_cause!="")
+  #nrow(alytesmeta);nrow(alytesmeta2)
+  #alytesmeta2$death_cause<-factor(alytesmeta2$death_cause)
+  
+  ##Add Binary Indicator for Death / Survival Model Censoring 
+    alytestad$mortality<-ifelse(alytestad$death_cause=="end_of_exper",0,1)
+    with(alytestad,table(mortality,death_cause))
+    #head(alytesmeta2)
+    table(alytestad$treatment)
+    
+######### THRESHOLD BD DETECTION
+    alytestad$GPL_GE[alytestad$GPL_GE<0.1]<-0
+    alytestad$CAPE_GE[alytestad$CAPE_GE<0.1]<-0
+
+```
+
+## Extras
+
+```{r}
+##### GLOBAL PLOT PARAMS  
+  plotopts<-theme(axis.text=element_text(size=18),axis.title=element_text(size=18),legend.text = element_text(size=14),legend.title = element_text(size=14))  
+
+
+  phib_plots<- theme(axis.text=element_text(size=15),axis.title=element_text(size=20),strip.text.x = element_text(size=20),legend.text = element_text(size=14),legend.title = element_text(size=14))
+  
+
+
+```
+
+# Analysis and Plots
+
+## Alytes Tadpole GEs (GPL)
+
+```{r}
+
+  ##Indicators for Lineage
+    alytestad$GPL_present<-"no"
+    alytestad$GPL_present[grep("GPL",alytestad$Lineage)]<-"yes"
+    
+    alytestad$CAPE_present<-"no"
+    alytestad$CAPE_present[grep("CAPE",alytestad$Lineage)]<-"yes"
+  
+##Stripped Out Origin IDS for Plot 
+  lineage_data<-data.frame(old=unique(alytestad$Lineage))
+  lineage_data$new<-gsub("ZA_","",gsub("EU_","",lineage_data[,1]))
+  alytestad$lineage_new<-lineage_data[,2][match(alytestad$Lineage,lineage_data[,1])]
+  
+  ##GPL Only
+    alytes_tad_gpl<-subset(alytestad,GPL_present=="yes")  
+    alytes_tad_gpl$Lineage<-factor(alytes_tad_gpl$Lineage)
+    alytes_tad_gpl$lineage_new<-factor(alytes_tad_gpl$lineage_new)
+    alytes_tad_gpl$Origin<-ifelse(grepl("ZA",alytes_tad_gpl$Lineage),"ZA","EU")
+  
+    
+  ## Proportion of Zeroes
+    mean(alytes_tad_gpl$GPL_GE==0,na.rm=T) # 76%
+    
+  ##Log(GE) + 0.001
+    alytes_tad_gpl$GPL_ge_log<-with(alytes_tad_gpl,log(GPL_GE+0.001))
+  
+  #Plot  
+  alytes_tad_gpl1<-ggplot(alytes_tad_gpl,aes(x=lineage_new,y=GPL_GE)) + geom_jitter(fill="lightblue",colour="white",shape=21,size=6,width = 0.1) + facet_wrap(.~Origin,scales="free_x") + guides(fill="none") + theme_bw() + stat_summary(fun.data = mean_se,  
+                 geom = "errorbar",width=0.1,linewidth=2) +stat_summary(fun = mean,shape=23,size=1,fill="white",color="black")
+  alytes_tad_gpl2<- alytes_tad_gpl1 + labs(y="Genomic Equivalents GPL",x="Lineage Dose Order") + phib_plots 
+  alytes_tad_gpl3<- alytes_tad_gpl2 + theme(axis.text.x=element_text(angle=45,hjust=1),axis.title.y = element_text(size=12))
+  alytes_tad_gpl4<-alytes_tad_gpl3 + scale_x_discrete(labels=c("GPL " = "GPL GPL", "CAPE_GPL" = "CAPE GPL",
+                              "GPL_CAPE" = "GPL CAPE","GPL_SHAM" = "GPL SHAM"),limits=c("GPL ","GPL_SHAM","GPL_CAPE","CAPE_GPL"))
+  alytes_tad_gpl5<- alytes_tad_gpl4 
+  alytes_tad_gpl5
+  #ggsave2('Alytes Tadpole GPL GE.pdf',alytes_tad_gpl5,width=15,height=10,units="cm")
+  
+
+```
+
+## Alytes Tadpole GEs (CAPE)
+
+```{r}
+    alytestad$CAPE_GE<-as.numeric(alytestad$CAPE_GE)
+
+ ##CAPE Only
+    alytes_tad_cape<-subset(alytestad,CAPE_present=="yes")  
+    alytes_tad_cape$Lineage<-factor(alytes_tad_cape$Lineage)
+    alytes_tad_cape$lineage_new<-factor(alytes_tad_cape$lineage_new)
+    alytes_tad_cape$Origin<-ifelse(grepl("ZA",alytes_tad_cape$Lineage),"ZA","EU")
+    alytes_tad_cape$cape_ge_round<-with(alytes_tad_cape,round(CAPE_GE))
+    
+  ## Proportion of Zeroes
+    mean(alytes_tad_cape$CAPE_GE==0,na.rm=T) # 87%
+    
+  ##Log(GE) + 0.001
+    alytes_tad_cape$CAPE_ge_log<-with(alytes_tad_cape,log(CAPE_GE+0.001))
+    
+  #Plot  
+    alytes_tad_cape1<-ggplot(alytes_tad_cape,aes(x=lineage_new,y=CAPE_GE))  + geom_jitter(fill="lightblue",colour="white",shape=21,size=5,width = 0.1) + facet_wrap(.~Origin,scales="free_x") + guides(fill="none") + theme_bw() + stat_summary(fun.data = mean_se,  
+                 geom = "errorbar",width=0.1,linewidth=2) +stat_summary(fun = mean,shape=23,size=1,fill="white",color="black")
+    alytes_tad_cape2<- alytes_tad_cape1 + labs(y="Genomic Equivalents CAPE",x="Lineage Dose Order") + phib_plots
+   alytes_tad_cape3<- alytes_tad_cape2 + theme(axis.text.x=element_text(angle=45,hjust=1),axis.title.y = element_text(size=12))
+  alytes_tad_cape4<-alytes_tad_cape3  + scale_x_discrete(labels=c("CAPE " = "CAPE CAPE", "CAPE_GPL" = "CAPE GPL",
+                              "GPL_CAPE" = "GPL CAPE","CAPE_SHAM" = "CAPE SHAM"),limits=c("CAPE ","CAPE_SHAM","GPL_CAPE","CAPE_GPL"))
+  alytes_tad_cape5<- alytes_tad_cape4 
+alytes_tad_cape5
+```
+
+## Combined Raw Data Plot
+```{r}
+rawplot1<-plot_grid(alytes_tad_gpl5,alytes_tad_cape5,nrow=2,labels="AUTO",label_size = 20)
+rawplot1
+ggsave2('Alytes Tadpole Raw Data GE Plot.pdf',rawplot1,height=22,width=15,units="cm")
+ggsave2('Alytes Tadpole Raw Data GE Plot.tiff',rawplot1,height=22,width=15,units="cm")
+
+```
+
+## Data Summaries
+```{r}
+alytes_tad_gpl %>% dplyr::group_by(lineage_new,Origin) %>% reframe(meanval=mean(gpl_ge_round))
+alytes_tad_cape %>% dplyr::group_by(lineage_new,Origin) %>% reframe(meanval=mean(cape_ge_round))
+
+```
+
+#MODELS
+
+## GE Models (GPL) [Figure S1]
+
+```{r}
+
+######### GE Models GPL
+  library(brms)
+    alytes_tad_gpl$gpl_ge_round<-round(as.numeric(alytes_tad_gpl$GPL_GE))
+
+  #Interaction Model   
+    gpl_mod1<-brm(GPL_ge_log ~ lineage_new*Origin,data=alytes_tad_gpl,family=gaussian())
+      summary(gpl_mod1)
+        bayes_R2(gpl_mod1)
+        #conditional_effects(gpl_mod1)
+        #pp_check(gpl_mod1)
+         gpl_mod1 <- add_criterion(gpl_mod1, "loo",moment_match=T,)
+  
+            
+  #Null Model 
+    gpl_mod_null<-brm(GPL_ge_log ~ 1,data=alytes_tad_gpl,family=gaussian())
+    gpl_mod_null<- add_criterion(gpl_mod_null, "loo",moment_match=T)
+      
+  #Model Selection    
+    print(loo_compare(gpl_mod1,gpl_mod_null),simplify=F)
+    
+      
+  gpl_mod2<-brm(GPL_GE ~ lineage_new*Origin,data=alytes_tad_gpl,family=gaussian())
+      summary(gpl_mod2)
+  conditional_effects(gpl_mod2)
+      
+############### PLOT DATA
+      
+    ## Extract 
+      alytes_gpl_conditional<-conditional_effects(gpl_mod1,"lineage_new:Origin")[[1]]
+
+    ##Plot Model Estimates
+      alytes_gpl_plot1<-ggplot() 
+      alytes_gpl_plot2<- alytes_gpl_plot1 + geom_errorbar(data=alytes_gpl_conditional,aes(x=lineage_new,ymin=lower__,ymax=upper__,colour=Origin),position = position_dodge(width=0.5),width=0.15)
+      alytes_gpl_plot3 <- alytes_gpl_plot2 + geom_point(data=alytes_gpl_conditional,aes(x=lineage_new,y=estimate__,fill=Origin),size=5,color="white",shape=21,position=position_dodge(width=0.5)) + scale_fill_brewer(palette = "Set2") + scale_color_brewer(palette = "Set2") + theme_bw() + labs(x="Treatment Order of Lineages",y="GPL Genomic Equivalents (log-GE)") + theme(legend.position = "top") + phib_plots + theme(axis.text.x=element_text(angle=45,hjust=1),axis.title.y = element_text(size=12))
+   alytes_gpl_plot4<- alytes_gpl_plot3  + scale_x_discrete(labels=c("GPL " = "GPL GPL", "CAPE_GPL" = "CAPE GPL",
+                              "GPL_CAPE" = "GPL CAPE","GPL_SHAM" = "GPL SHAM"),limits=c("GPL ","GPL_SHAM","GPL_CAPE","CAPE_GPL"))
+      alytes_gpl_plot4 
+```
+
+
+## GE Models (CAPE) [Figure S1]
+
+```{r}
+######### GE Models CAPE      
+      
+
+    cape_mod1<-brm(CAPE_ge_log ~ lineage_new*Origin,data=alytes_tad_cape,family=gaussian())
+      cape_mod1<- add_criterion(cape_mod1, "loo",moment_match=T)
+
+      summary(cape_mod1)
+      bayes_R2(cape_mod1)
+      #conditional_effects(cape_mod1)
+      pp_check(cape_mod1)
+
+
+      
+  #Null Model 
+    cape_mod_null<-brm(CAPE_ge_log ~ 1,data=alytes_tad_cape,family=gaussian())
+      cape_mod_null<- add_criterion(cape_mod_null, "loo",moment_match=T)
+      
+  #Model Selection    
+    loo_compare(cape_mod1,cape_mod_null) %>% print(.,simplify=F)
+     
+    ## Extract 
+      alytes_cape_conditional<-conditional_effects(cape_mod1,"lineage_new:Origin")[[1]]
+
+    ##Plot Model Estimates
+      alytes_cape_plot1<-ggplot() 
+      alytes_cape_plot2<- alytes_cape_plot1 + geom_errorbar(data=alytes_cape_conditional,aes(x=lineage_new,ymin=lower__,ymax=upper__,colour=Origin),position = position_dodge(width=0.5),width=0.15)
+      alytes_cape_plot3 <- alytes_cape_plot2 + geom_point(data=alytes_cape_conditional,aes(x=lineage_new,y=estimate__,fill=Origin),size=5,color="white",shape=21,position=position_dodge(width=0.5)) + scale_fill_brewer(palette = "Set2") + scale_color_brewer(palette = "Set2") + theme_bw() + labs(x="Treatment Order of Lineages",y="CAPE Genomic Equivalents (log-GE)") + theme(legend.position = "top") + phib_plots + theme(axis.text.x=element_text(angle=45,hjust=1),axis.title.y = element_text(size=12))
+   #alytes_cape_plot3
+    alytes_cape_plot4<- alytes_cape_plot3  + scale_x_discrete(labels=c("CAPE " = "CAPE CAPE", "CAPE_GPL" = "CAPE GPL",
+                              "GPL_CAPE" = "GPL CAPE","CAPE_SHAM" = "CAPE SHAM"),limits=c("CAPE ","CAPE_SHAM","GPL_CAPE","CAPE_GPL"))
+alytes_cape_plot4
+```
+
+## Combined Plot [Figure S1]
+````{r}
+
+model_pred1<-plot_grid(alytes_gpl_plot4,alytes_cape_plot4,nrow=2,labels="AUTO")
+ggsave2('Genomic Equivalents Model Predictions.pdf',model_pred1,height=22,width=15,units="cm")
+```
+
+# COMPETITION ANALYSIS
+
+```{r}
+
+#############################  
+#     COMPETITION CO-OCURRENCE 12th May 2021
+#############################         
+      
+    #Summary of Prevalence, GE range, and coinfection occurrence across all treatments. 
+      
+    #Positive Counts    
+      alytestad %>% filter(GPL_GE>0) %>% group_by(Lineage) %>% summarise(n=n(),mean=mean(GPL_GE),min=min(GPL_GE),max=max(GPL_GE))
+      
+    #All Data  
+      alytes_summary<-alytestad %>% group_by(Lineage) %>% summarise(n=n(),coinfection=sum(CAPE_GE>0 & GPL_GE>0,na.rm=T),CAPE_only=sum(CAPE_GE>0 & GPL_GE==0,na.rm=T),
+                                                    GPL_only=sum(CAPE_GE==0 & GPL_GE>0,na.rm=T),
+                                                  #Positive Infection Data (irrespective of coinfection or not)  
+                                                    GPL_min=min(GPL_GE[GPL_GE>0],na.rm=T),
+                                                    GPL_max=max(GPL_GE[GPL_GE>0],na.rm=T),GPL_mean=mean(GPL_GE[GPL_GE>0],na.rm=T),
+                                                    CAPE_min=min(CAPE_GE[CAPE_GE>0],na.rm=T),CAPE_mean=mean(CAPE_GE[CAPE_GE>0],na.rm=T),
+                                                    CAPE_max=max(CAPE_GE[CAPE_GE>0],na.rm=T),
+                                                  # Single Infection Only Data
+                                                    GPL_single_min=min(GPL_GE[GPL_GE>0 & CAPE_GE==0]),
+                                                    GPL_single_max=max(GPL_GE[GPL_GE>0 & CAPE_GE==0]),
+                                                    GPL_single_mean=mean(GPL_GE[GPL_GE>0 & CAPE_GE==0]),
+                                                    CAPE_single_min=min(CAPE_GE[CAPE_GE>0],na.rm=T),
+                                                    CAPE_single_max=max(CAPE_GE[CAPE_GE>0],na.rm=T),
+                                                    CAPE_single_mean=mean(CAPE_GE[CAPE_GE>0],na.rm=T),
+                                                  #Coinfection Data
+                                                    GPL_co_min=min(GPL_GE[GPL_GE>0 & CAPE_GE>0]),
+                                                  GPL_co_max=max(GPL_GE[GPL_GE>0 & CAPE_GE>0]),
+                                                  GPL_co_mean=mean(GPL_GE[GPL_GE>0 & CAPE_GE>0]),
+                                                  CAPE_co_min=min(CAPE_GE[CAPE_GE>0 & GPL_GE>0],na.rm=T),
+                                                  CAPE_co_max=max(CAPE_GE[CAPE_GE>0 & GPL_GE>0],na.rm=T),
+                                                  CAPE_co_mean=mean(CAPE_GE[CAPE_GE>0 & GPL_GE>0],na.rm=T),
+                                                    )
+      
+        #ßwrite.csv(alytes_summary,'Alytes Infection Summary Data.csv')
+ 
+
+```
+
+```{r}
+#############################  
+#     COMPETITION CO-OCURRENCE 12th May 2021
+#############################         
+      
+    #Summary of Prevalence, GE range, and coinfection occurrence across all treatments. 
+      
+    #Positive Counts    
+      alytestad %>% filter(GPL_GE>0) %>% group_by(Lineage) %>% summarise(n=n(),mean=mean(GPL_GE),min=min(GPL_GE),max=max(GPL_GE))
+      
+    #All Data  
+      alytes_summary<-alytestad %>% group_by(Lineage) %>% summarise(n=n(),coinfection=sum(CAPE_GE>0 & GPL_GE>0,na.rm=T),CAPE_only=sum(CAPE_GE>0 & GPL_GE==0,na.rm=T),
+                                                    GPL_only=sum(CAPE_GE==0 & GPL_GE>0,na.rm=T),
+                                                  #Positive Infection Data (irrespective of coinfection or not)  
+                                                    GPL_min=min(GPL_GE[GPL_GE>0],na.rm=T),
+                                                    GPL_max=max(GPL_GE[GPL_GE>0],na.rm=T),GPL_mean=mean(GPL_GE[GPL_GE>0],na.rm=T),
+                                                    CAPE_min=min(CAPE_GE[CAPE_GE>0],na.rm=T),CAPE_mean=mean(CAPE_GE[CAPE_GE>0],na.rm=T),
+                                                    CAPE_max=max(CAPE_GE[CAPE_GE>0],na.rm=T),
+                                                  # Single Infection Only Data
+                                                    GPL_single_min=min(GPL_GE[GPL_GE>0 & CAPE_GE==0]),
+                                                    GPL_single_max=max(GPL_GE[GPL_GE>0 & CAPE_GE==0]),
+                                                    GPL_single_mean=mean(GPL_GE[GPL_GE>0 & CAPE_GE==0]),
+                                                    CAPE_single_min=min(CAPE_GE[CAPE_GE>0],na.rm=T),
+                                                    CAPE_single_max=max(CAPE_GE[CAPE_GE>0],na.rm=T),
+                                                    CAPE_single_mean=mean(CAPE_GE[CAPE_GE>0],na.rm=T),
+                                                  #Coinfection Data
+                                                    GPL_co_min=min(GPL_GE[GPL_GE>0 & CAPE_GE>0]),
+                                                  GPL_co_max=max(GPL_GE[GPL_GE>0 & CAPE_GE>0]),
+                                                  GPL_co_mean=mean(GPL_GE[GPL_GE>0 & CAPE_GE>0]),
+                                                  CAPE_co_min=min(CAPE_GE[CAPE_GE>0 & GPL_GE>0],na.rm=T),
+                                                  CAPE_co_max=max(CAPE_GE[CAPE_GE>0 & GPL_GE>0],na.rm=T),
+                                                  CAPE_co_mean=mean(CAPE_GE[CAPE_GE>0 & GPL_GE>0],na.rm=T),
+                                                    )
+      
+        write.csv(alytes_summary,'Alytes Infection Summary Data.csv')
+```
+
+
+
+    

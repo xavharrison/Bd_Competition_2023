@@ -1,0 +1,533 @@
+---
+title: "Bd Dose Effects Analysis Mar24"
+author: "Xav Harrison"
+date: "01/03/2021"
+output:
+  html_document:
+    toc: true
+    toc_depth: 2
+    toc_float: true
+    number_sections: true
+    theme: united
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Data and Setup 
+
+## Libraries 
+```{r}
+
+library(ggplot2)
+ library(MuMIn)
+  library(dplyr)
+  library(tidyr)
+  options(na.action="na.fail") 
+  library(brms)
+    library(ggplot2)
+  library(RColorBrewer)
+
+```
+
+## Data Files
+
+### Bufo
+```{r}
+
+#############################
+# BUFO
+##############################
+
+  bufo<-read.csv('bufo 2014/Bufobufo_2014_GPLvsCAPE analysis data sheet.csv',header=T)
+  head(bufo)
+
+  ##########Housekeeping
+
+    #Correct Spelling Mistake
+      bufo$death_cause<-as.character(bufo$death_cause)
+      bufo$death_cause[which(bufo$death_cause=="end_of_exsperiment")]<-"end_of_experiment"
+      
+    #Correct Issue with Date
+      bufo$death_date<-with(bufo,gsub("0214","2014",death_date))
+   
+    #Convert Dates and Calculate Delta-Mass
+      bufo$weightdate1<-strptime(bufo$weight_date_1,format="%d.%m.%Y")
+      bufo$weightdate2<-strptime(bufo$weight_date_2,format="%d.%m.%Y")
+      bufo$daysbetweenweights<-with(bufo,weightdate2-weightdate1)
+      bufo$deltamass<-with(bufo,weight_2 - weight_1)
+      
+  #Infection Load Graphs
+    table(bufo$treatment)
+    
+   #Tidying Up Mortality Data (identifying censored individuals)
+    table(bufo$death_cause)
+    bufo$death_censor<-ifelse(bufo$death_cause=="end_of_experiment",1,0)    
+    bufo$death_binary<-ifelse(bufo$death_cause=="end_of_experiment",0,1)    
+    
+  #Add Days Survived
+    bufo$days_survived<-as.numeric(julian(strptime(bufo$death_date,format="%d.%m.%Y"))) -as.numeric(julian(bufo$weightdate1))
+    
+  #Split Treatment into Dose and Lineage
+    bufo$dose<-substr(bufo$treatment,1,1)
+    bufo$lineage<-substr(bufo$treatment,2,6)
+    tail(bufo)
+    
+  #Get Rid of Controls
+    bufo.nocontrol<-subset(bufo,treatment!="Control") 
+    with(bufo,table(dose,lineage))
+    
+   ## Add Origin 
+      bufo.nocontrol$origin<-ifelse(grepl("EU",bufo.nocontrol$lineage),"EU","ZA")
+    ##Add Lineage
+          bufo.nocontrol$lineage2<-ifelse(grepl("GPL",bufo.nocontrol$lineage),"GPL","CAPE")
+  head(bufo.nocontrol)
+
+```
+
+### Gutturalis Data and Cleaning 
+
+```{r}
+
+  #############################  
+  #     GUTTURALIS
+  ############################# 
+
+    #Read in GE vals
+      gutturalis<-read.csv('guttaralis 2011/Gutturalis GE R Input.csv',header=T)
+      head(gutturalis)
+      
+    #Read in Weights
+      gut_weights<-read.csv('guttaralis 2011/Gutturalis Weights R Input.csv',header=T)
+      head(gut_weights)
+      
+    #Strip X codes out of Gutturalis GE 'Code' column to allow matching of weights
+      gutturalis$Code<-gsub("X","x",gutturalis$Code)
+      gutturalis$code_short<-gsub("x","",gutturalis$Code)  
+       
+    
+    #Fix "//" separator issue 
+     gutturalis$code_short2<-gsub("\\\\","/",gutturalis$code_short)
+    
+    #Match Weights 
+      gutturalis$start_mass<-gut_weights$start_mass[match(gutturalis$code_short2,gut_weights$Code)]
+      gutturalis$end_mass<-gut_weights$end_mass[match(gutturalis$code_short2,gut_weights$Code)]
+      gutturalis$death_date<-gut_weights$death_date[match(gutturalis$code_short2,gut_weights$Code)]
+      head(gutturalis)
+      
+    #Add Positive Indicator for GE
+      gutturalis$chytrid_positive<-ifelse(gutturalis$GE>=0.1,1,0)
+      head(gutturalis)
+      
+    #Add Dates for Survival 
+      gutturalis$death_date<-gsub("E","Dec 26/2011",gutturalis$death_date)
+      gutturalis$death_date<-gsub("Dec ","12/",gutturalis$death_date)
+      
+      gutturalis$deathday<-strptime(gutturalis$death_date,format="%m/%d/%Y")$yday - strptime("12/01/2011",format="%m/%d/%Y")$yday
+      head(gutturalis)
+      
+    #Add Censor
+      gutturalis$death_event<-ifelse(gutturalis$death_date=="12/26/2011",0,1)
+    
+    
+    with(gutturalis,table(Dose,Lineage))
+    
+    ## Add Origin 
+      gutturalis$origin<-ifelse(grepl("EU",gutturalis$Lineage),"EU","ZA")
+    ##Add Lineage
+          gutturalis$lineage2<-ifelse(grepl("GPL",gutturalis$Lineage),"GPL","CAPE")
+
+
+```
+
+## Global Options
+
+```{r}
+
+##### Global Plot Options 
+  plotopts<-theme(axis.text=element_text(size=18),axis.title=element_text(size=18),legend.text = element_text(size=14),legend.title = element_text(size=14))
+
+
+```
+
+
+# Mortality Models 
+
+## Bufo Mortality 
+
+```{r}
+#Interaction Model   
+    bufo.nocontrol$z_weight<-as.numeric(scale(bufo.nocontrol$weight_1))
+    b2<-brm(death_binary~ dose*lineage + z_weight,data=bufo.nocontrol,family=bernoulli(link = "logit"))
+      par(mfrow=c(2,2))
+      #conditional_effects(b2,ask=F)
+    summary(b2)
+    
+  b3<-brm(death_binary~ dose*lineage2*origin + z_weight,data=bufo.nocontrol,family=bernoulli(link = "logit"))
+    summary(b3)
+      #conditional_effects(b3,ask=F)
+
+    #Extract plot 
+      b2_plotdata <- conditional_effects(b2, "dose:lineage")[[1]]
+    
+    #Standardise Labels for Plot 
+      b2_plotdata$lineage<-as.character( b2_plotdata$lineage)
+      b2_plotdata$lineage[which(b2_plotdata$lineage=="SACAP")]<-"SACAPE"
+      b2_plotdata$lineage[which(b2_plotdata$lineage=="EUCAP")]<-"EUCAPE"
+
+    #Colours
+      rbrewer_set2<-brewer.pal(5,"Set2")[1:4]
+      bufo_cols<-c("EUGPL"=rbrewer_set2[1],"EUCAPE"=rbrewer_set2[2],"SAGPL"=rbrewer_set2[3],"SACAPE"=rbrewer_set2[4])
+      
+    #Bufo Plot   
+      bufo_mortality1<- ggplot(b2_plotdata,aes(x=dose,y=estimate__,fill=lineage)) + geom_errorbar(aes(ymin=lower__,ymax=upper__),width=0.3,position = position_dodge(width=0.5)) + scale_x_discrete(breaks=c("L","H"),limits=c("L","H"),labels=c("Low","High"))
+      bufo_mortality2<- bufo_mortality1 + geom_point(shape=21,size=6,position = position_dodge(width=0.5),color="white") + theme_bw() + labs(x="Dose",y="Mortality",fill="Lineage") + plotopts + theme(legend.position = "right") + scale_fill_manual(values=bufo_cols)
+      bufo_mortality2
+
+```
+
+## Gutturalis Mortality 
+
+```{r}
+
+     ############################### 
+      # MORTALITY  MODELS 
+      ###############################
+  
+    #Scale Mass
+      gutturalis$start_mass_z<-as.numeric(scale(gutturalis$start_mass))
+
+  
+    #Interaction Model   
+      g2<-brm(death_event~ Dose*Lineage + start_mass_z,data=gutturalis,family=bernoulli(link = "logit"),prior = c(set_prior("normal(0,5)", class = "b")))
+      #conditional_effects(g2,ask=F)
+      summary(g2)
+      
+```
+
+###  Plot
+```{r}
+
+    #Extract plot 
+      g2_plotdata <- conditional_effects(g2, "Dose:Lineage")[[1]]
+        
+    #Add Metadata
+      g2_plotdata$Origin<-ifelse(grepl("EU",g2_plotdata$Lineage),"EU","ZA")
+            g2_plotdata$Lineage2<-ifelse(grepl("GPL",g2_plotdata$Lineage),"GPL","CAPE")
+
+    #Colours
+      rbrewer_set2<-brewer.pal(5,"Set2")[1:4]
+      gutt_cols<-c("EUGPL"=rbrewer_set2[1],"EUCAPE"=rbrewer_set2[2],"SAGPL"=rbrewer_set2[3])
+      
+    #Gutturalis Plot   
+      gutturalis_mortality1<- ggplot(g2_plotdata,aes(x=Dose,y=estimate__,fill=Lineage)) + geom_errorbar(aes(ymin=lower__,ymax=upper__),width=0.3,position = position_dodge(width=0.5)) + scale_x_discrete(breaks=c("L","H"),limits=c("L","H"),labels=c("Low","High"))
+      gutturalis_mortality2<- gutturalis_mortality1 + geom_point(shape=21,size=6,position = position_dodge(width=0.5),color="white") + theme_bw() + labs(x="Dose",y="Mortality",fill="Lineage") + plotopts + guides(fill="none") + scale_fill_manual(values=gutt_cols) + ylim(c(0,1))
+      gutturalis_mortality2
+      
+      
+      #Gutturalis Alternaitve Plot
+      # gutturalis_mort_version1<- ggplot(g2_plotdata,aes(x=Dose,y=estimate__,fill=Lineage2)) + geom_errorbar(aes(ymin=lower__,ymax=upper__),width=0.25,position = position_dodge(width=0.5)) + scale_x_discrete(breaks=c("L","H"),limits=c("L","H"),labels=c("Low","High"))
+      # gutturalis_mort_version2<- gutturalis_mort_version1 + geom_point(aes(shape=Origin),size=6,position = position_dodge(width=0.5)) + theme_bw() + labs(x="Dose",y="Mortality",fill="Lineage") + plotopts  + scale_shape_manual(values=c(21,22)) + ylim(c(0,1)) + scale_fill_brewer(palette = "Set2")
+      # gutturalis_mort_version2
+      
+
+```
+
+## Combined Mortality Plot 
+
+```{r}
+
+g2_plotdata$Species<-"S gutturalis"
+b2_plotdata$Species<-"B bufo"
+colnames(b2_plotdata)[1:2]<-c("Dose","Lineage")
+
+bg_mort_combined<-rbind(b2_plotdata[,c("Dose","Lineage","estimate__","lower__","upper__","Species")],g2_plotdata[,c("Dose","Lineage","estimate__","lower__","upper__","Species")])
+
+##Sort Labels
+bg_mort_combined$Lineage[which(bg_mort_combined$Lineage=="SACAPE")]<-"ZACAPE"
+bg_mort_combined$Lineage[which(bg_mort_combined$Lineage=="SAGPL")]<-"ZAGPL"
+bg_mort_combined$Species<-as.factor(bg_mort_combined$Species)
+levels(bg_mort_combined$Species)<-c(expression(paste("European ",italic("B. bufo"))),expression(paste("African ",italic("S. gutturalis"))))
+
+mort_combined<-ggplot(bg_mort_combined,aes(x=Dose,y=estimate__,fill=Lineage)) + geom_errorbar(aes(ymin=lower__,ymax=upper__),width=0.3,position = position_dodge(width=0.5)) + scale_x_discrete(breaks=c("L","H"),limits=c("L","H"),labels=c("Low","High")) + facet_wrap(.~Species,labeller = label_parsed)
+
+      mort_combined2<- mort_combined + geom_point(shape=21,size=6,position = position_dodge(width=0.5),color="white") + theme_bw() + labs(x="Dose",y="\n Mortality",fill="Lineage") + plotopts  + scale_fill_brewer(palette = "Set2") + theme(legend.position = "bottom",strip.text.x=element_text(size=16))
+mort_combined2
+#       library(cowplot)
+
+library(cowplot)
+# mort_combined<-plot_grid(gutturalis_mortality2,bufo_mortality2,labels=c("A","B"),label_size = 20,rel_widths = c(2,3))
+# mort_combined
+
+
+
+
+```
+
+
+# INFECTION BURDEN MODELS
+
+## Data Subsetting 
+
+```{r}
+
+#########GPL
+  bufo_gpl<- bufo[grep("GPL",bufo$treatment),]
+  nrow(bufo_gpl)
+  bufo_gpl$treatment<-factor(bufo_gpl$treatment)
+
+##Sort Out Weight
+  bufo_gpl$start_mass_z<-as.numeric(scale(bufo_gpl$weight_1))
+
+
+
+#########CAPE
+  bufo_cape<- bufo[grep("CAPE",bufo$treatment),]
+  nrow(bufo_cape)
+  bufo_cape$treatment<-factor(bufo_cape$treatment)
+
+##Sort Out Weight
+  bufo_cape$start_mass_z<-as.numeric(scale(bufo_cape$weight_1))
+
+#########GPL
+  gutturalis_gpl<- gutturalis[grep("GPL",gutturalis$Treatment),]
+  nrow(gutturalis_gpl)
+  gutturalis_gpl$Treatment<-factor(gutturalis_gpl$Treatment)
+
+##Sort Out Weight
+  gutturalis_gpl$start_mass_z<-as.numeric(scale(gutturalis_gpl$start_mass))
+
+
+```
+
+## Bufo 
+
+
+### Cape and GPL Models
+```{r}
+
+##### GPL 
+# Tidy Up Infection 
+             bufo_gpl$ge_round<-round(bufo_gpl$GPL_GE)
+              bufo_gpl$ge_log<-log(bufo_gpl$GPL_GE+0.001)
+             
+     #Negative Binomial Fit
+              gpl1_nb<-brm(ge_round ~ lineage * dose + start_mass_z,data=bufo_gpl,family=negbinomial())
+                summary(gpl1_nb)
+                pp_check(gpl1_nb)
+                      gpl1_nb<- add_criterion(gpl1_nb, "loo")
+
+                
+          
+  #Null Model 
+    gpl1_nb_null<-brm(ge_round ~ 1,data=bufo_gpl,family=negbinomial())
+      gpl1_nb_null<- add_criterion(gpl1_nb_null, "loo")
+      
+  #Model Selection    
+    gpl_nb_lootab<-print(loo_compare(gpl1_nb,gpl1_nb_null),simplify=F)
+          gpl_nb_lootab[1,7] - gpl_nb_lootab[2,7]
+                
+                
+                
+### Plotting                 
+      bufo_gpl_conditional<-conditional_effects(gpl1_nb,"dose:lineage")[[1]]
+          
+   
+  ###### CAPE     
+          bufo_cape$ge_round<-round(bufo_cape$CAPE_GE)
+          bufo_cape$ge_log<-log(bufo_cape$CAPE_GE+0.001)
+             
+     #Negative Binomial Fit
+              bufo_cape_nb1<-brm(ge_round ~ lineage * dose + start_mass_z,data=bufo_cape,family=negbinomial())
+                summary(bufo_cape_nb1)
+                pp_check(bufo_cape_nb1)
+                
+                
+      bufo_cape_conditional<-conditional_effects(bufo_cape_nb1,"dose:lineage")[[1]]
+      
+      
+      
+##### COMBINE
+          bufo_GE_plotdata<-rbind(bufo_gpl_conditional[,c("dose","lineage","estimate__","lower__","upper__")],bufo_cape_conditional[,c("dose","lineage","estimate__","lower__","upper__")])
+                  
+
+```
+
+### Bufo All Data
+
+```{r}
+
+#Combine Data (1 column for GE as response)
+  bufo_all<-rbind(bufo_gpl[,c("ge_round","lineage","dose","weight_1")],bufo_cape[,c("ge_round","lineage","dose","weight_1")])
+  nrow(bufo_all)
+  bufo_all$start_mass_z<-as.numeric(scale(bufo_all$weight_1))
+  
+#Full Model   
+bufoall_gemod1<-brm(ge_round ~ lineage * dose + start_mass_z,data=bufo_all,family=negbinomial(),save_pars = save_pars(all=T))
+                summary(bufoall_gemod1)
+                pp_check(bufoall_gemod1)
+  
+#Model Selection                
+        bufoall_gemod1<- add_criterion(bufoall_gemod1, "loo",moment_match=T)
+        bufoall_gemod_null<-brm(ge_round ~ 1,data=bufo_all,family=negbinomial(),save_pars = save_pars(all=T))
+        bufoall_gemod_null<- add_criterion(bufoall_gemod_null, "loo")
+          print(loo_compare(bufoall_gemod1,bufoall_gemod_null),simplify=F)
+        
+
+
+```
+
+
+## Gutturalis GPL
+
+```{r}
+  gutturalis_gpl$ge_round<-round(gutturalis_gpl$GE)
+#Model
+  gutturalis_gpl_mod1<-brm(ge_round ~ Lineage * Dose + start_mass_z,data=gutturalis_gpl,family=negbinomial(),save_pars = save_pars(all=T))
+  summary(gutturalis_gpl_mod1)
+#Model Selectipn
+    gutturalis_gpl_mod1<- add_criterion(gutturalis_gpl_mod1, "loo",moment_match=T)
+    gutturalis_gpl_mod_null<-brm(ge_round ~ 1,data=gutturalis_gpl,family=negbinomial(),save_pars = save_pars(all=T))
+    gutturalis_gpl_mod_null<- add_criterion(gutturalis_gpl_mod_null, "loo")
+    print(loo_compare(gutturalis_gpl_mod1,gutturalis_gpl_mod_null),simplify=F)
+
+    
+  
+```
+
+
+## Gutturalis All
+
+```{r}
+
+
+##### Gutturalis GPL
+
+
+##### Gutturalis  All Data 
+ #Negative Binomial Fit
+     
+      #ROund GE
+        gutturalis$ge_round<-as.numeric(round(gutturalis$GE))
+   
+              gemod_g1_nb_bayes<-brm(ge_round ~ Lineage * Dose + start_mass_z,data=gutturalis,family=negbinomial(),save_pars = save_pars(all=T))
+                summary(gemod_g1_nb_bayes)
+                pp_check(gemod_g1_nb_bayes)
+                #conditional_effects(gemod_g1_nb_bayes)
+        gemod_g1_nb_bayes<- add_criterion(gemod_g1_nb_bayes, "loo",moment_match=T)
+  #loo(gemod_g1_nb_bayes)
+                
+         #Null Model 
+    gemod_g1_nb_bayes_null<-brm(ge_round ~ 1,data=gutturalis,family=negbinomial(),save_pars = save_pars(all=T))
+      gemod_g1_nb_bayes_null<- add_criterion(gemod_g1_nb_bayes_null, "loo")
+      
+  #Model Selection    
+  print(loo_compare(gemod_g1_nb_bayes,gemod_g1_nb_bayes_null),simplify=F)
+      
+ 
+      ## Extract 
+        gutturalis_ge_conditional<-conditional_effects(gemod_g1_nb_bayes,"Dose:Lineage")[[1]]
+       gutturalis_GE_plotdata<-gutturalis_ge_conditional[,c("Dose","Lineage","estimate__","lower__","upper__")]
+
+```
+
+## Combined Infection Load Plot 
+
+###  Combine Data
+```{r}
+#Pad Species Names 
+  gutturalis_GE_plotdata$Species<- "S gutturalis"
+  bufo_GE_plotdata$Species<- "B bufo"
+  
+#Fix Column Names 
+  colnames(bufo_GE_plotdata)[1:2]<-c("Dose","Lineage")
+
+
+#Stitch Together  
+  bg_GE_combined<-rbind(bufo_GE_plotdata,gutturalis_GE_plotdata)
+  
+#Sort Lineage Names   
+  bg_GE_combined$Lineage<-as.character(bg_GE_combined$Lineage)
+  bg_GE_combined$Lineage[which(bg_GE_combined$Lineage=="EUCAP")]<-"EUCAPE"
+  bg_GE_combined$Lineage[which(bg_GE_combined$Lineage=="SACAP")]<-"ZACAPE"
+  bg_GE_combined$Lineage[which(bg_GE_combined$Lineage=="SAGPL")]<-"ZAGPL"
+    table(bg_GE_combined$Lineage)
+    
+#Sort Dose Names     
+    table(bg_GE_combined$Dose)
+    bg_GE_combined$Species<-as.factor(bg_GE_combined$Species)
+     levels(bg_GE_combined$Species)<-c(expression(paste("European ",italic("B. bufo"))),expression(paste("African ",italic("S. gutturalis"))))
+    
+    
+    
+#Assemble Raw Data for Plot 
+
+#Bufo Raw Data     
+  bufo_raw_new<-data.frame(estimate__=c(bufo_cape$CAPE_GE,bufo_gpl$GPL_GE),Lineage=c(bufo_cape$lineage,bufo_gpl$lineage),Dose=c(bufo_cape$dose,bufo_gpl$dose),Species="B Bufo")
+  bufo_raw_new$Lineage<-as.character(bufo_raw_new$Lineage)
+  bufo_raw_new$Lineage[which(bufo_raw_new$Lineage=="EUCAP")]<-"EUCAPE"
+    bufo_raw_new$Lineage[which(bufo_raw_new$Lineage=="SACAP")]<-"SACAPE"
+
+  #Gutturalis Raw Data  
+    gutturalis_raw_new<- gutturalis  %>% select(c("GE","Dose","Lineage"))
+    colnames(gutturalis_raw_new)[1]<-"estimate__"
+    gutturalis_raw_new$Species<-"S Gutturalis"
+    
+
+ 
+  ##Combine
+    raw_ge_combined<-rbind(bufo_raw_new,gutturalis_raw_new)
+      head(raw_ge_combined)
+    #Sort Lineage Labels  
+      raw_ge_combined$Lineage[which(raw_ge_combined$Lineage=="SACAPE")]<-"ZACAPE"
+      raw_ge_combined$Lineage[which(raw_ge_combined$Lineage=="SAGPL")]<-"ZAGPL"
+    #Sort Labeller
+      raw_ge_combined$Species<-as.factor(raw_ge_combined$Species)
+      levels(raw_ge_combined$Species)<-c(expression(paste("European ",italic("B. bufo"))),expression(paste("African ",italic("S. gutturalis"))))
+
+# f <- factor(c("a","b"))
+# levels(f) <- c("c", "a", "b")
+# f
+    
+```
+
+###  Plot
+
+```{r}
+#####  Plot
+  bg_GE_plot1<-ggplot() 
+  
+#Raw Data  
+  bg_GE_plot2<- bg_GE_plot1 + geom_point(data=raw_ge_combined,aes(x=Dose,y=estimate__,fill=Lineage),shape=21,size=3,position = position_jitterdodge(jitter.width = 0.05,seed=12345,dodge.width = 0.5),color="white")
+
+  #Add Model Predictions
+    bg_GE_plot3<- bg_GE_plot2   + geom_errorbar(data=bg_GE_combined,aes(x=Dose,ymin=lower__,ymax=upper__,group=Lineage),width=0.3,position = position_dodge(width=0.5)) + geom_point(data=bg_GE_combined,aes(x=Dose,y=estimate__,fill=Lineage),shape=21,size=6,position = position_dodge(width=0.5),color="white") + scale_x_discrete(breaks=c("L","H"),limits=c("L","H"),labels=c("Low","High")) + facet_wrap(.~Species,labeller = label_parsed)
+    
+    
+## Add Aesthetics    
+      bg_GE_plot4<- bg_GE_plot3 + theme_bw() + labs(x="Dose",y="Infection Load \n (Genomic Equivalents)",fill="Lineage") + plotopts  + scale_fill_brewer(palette = "Set2") + theme(legend.position = "bottom",strip.text.x=element_text(size=16))
+bg_GE_plot4
+
+## Add Aesthetics, Ignore Model Predictions
+  bg_GE_plot5<- bg_GE_plot4 + theme_bw() + labs(x="Dose",y="Infection Load \n (Genomic Equivalents)",fill="Lineage") + plotopts  + scale_fill_brewer(palette = "Set2") + theme(legend.position = "bottom",strip.text.x=element_text(size=16)) + facet_wrap(.~Species,labeller = label_parsed)
+  bg_GE_plot5
+```
+
+
+
+## COMBINED PLOT
+
+```{r}
+library(cowplot)
+infection_combined<-plot_grid(bg_GE_plot5,mort_combined2,nrow=2,labels="AUTO",label_size=20)
+
+#dose_combined<-plot_grid(mort_combined2,bg_prev_plot2,bg_GE_plot5,nrow=3,labels="AUTO",label_size = 20)
+#dose_combined
+
+  ggsave2('Infection Sclerophrys Bufo Mar24.pdf',infection_combined,width=22,height=22,units="cm")
+  ggsave2('Infection Sclerophrys Bufo Mar24.tiff',infection_combined,width=22,height=22,units="cm")
+
+```
+
+
