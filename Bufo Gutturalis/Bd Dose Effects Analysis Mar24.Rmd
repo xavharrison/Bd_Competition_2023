@@ -1,7 +1,7 @@
 ---
-title: "Bd Dose Effects Analysis Mar24"
+title: "Bd Dose Effects Analysis"
 author: "Xav Harrison"
-date: "01/03/2021"
+date: "Nov 2026"
 output:
   html_document:
     toc: true
@@ -250,9 +250,9 @@ bg_mort_combined$Lineage[which(bg_mort_combined$Lineage=="SAGPL")]<-"ZAGPL"
 bg_mort_combined$Species<-as.factor(bg_mort_combined$Species)
 levels(bg_mort_combined$Species)<-c(expression(paste("European ",italic("B. bufo"))),expression(paste("African ",italic("S. gutturalis"))))
 
-mort_combined<-ggplot(bg_mort_combined,aes(x=Dose,y=estimate__,fill=Lineage)) + geom_errorbar(aes(ymin=lower__,ymax=upper__),width=0.3,position = position_dodge(width=0.5)) + scale_x_discrete(breaks=c("L","H"),limits=c("L","H"),labels=c("Low","High")) + facet_wrap(.~Species,labeller = label_parsed)
+mort_combined<-ggplot(bg_mort_combined,aes(x=Dose,y=estimate__,fill=Lineage)) + geom_errorbar(aes(ymin=lower__,ymax=upper__),width=0.3,position = position_dodge(width=0.5)) + scale_x_discrete(breaks=c("L","H"),limits=c("L","H"),labels=c("Low","High")) + facet_wrap(.~Species,labeller = label_parsed,nrow=2)
 
-      mort_combined2<- mort_combined + geom_point(shape=21,size=6,position = position_dodge(width=0.5),color="white") + theme_bw() + labs(x="Dose",y="\n Mortality",fill="Lineage") + plotopts  + scale_fill_brewer(palette = "Set2") + theme(legend.position = "bottom",strip.text.x=element_text(size=16))
+      mort_combined2<- mort_combined + geom_point(shape=23,size=4,position = position_dodge(width=0.5),color="white") + theme_bw() + labs(x="Dose",y="\n Mortality",fill="Lineage") + plotopts  + scale_fill_brewer(palette = "Set2") + theme(legend.position = "bottom",strip.text.x=element_text(size=16)) 
 mort_combined2
 #       library(cowplot)
 
@@ -305,8 +305,8 @@ library(cowplot)
 
 
 ### Cape and GPL Models
-```{r}
-
+Not run 
+```
 ##### GPL 
 # Tidy Up Infection 
              bufo_gpl$ge_round<-round(bufo_gpl$GPL_GE)
@@ -358,30 +358,63 @@ library(cowplot)
 
 ```{r}
 
+##### GPL 
+# Tidy Up Infection 
+      bufo_gpl$ge_round<-round(bufo_gpl$GPL_GE)
+      bufo_gpl$ge_log<-log(bufo_gpl$GPL_GE+0.001)
+              
+  ###### CAPE     
+          bufo_cape$ge_round<-round(bufo_cape$CAPE_GE)
+          bufo_cape$ge_log<-log(bufo_cape$CAPE_GE+0.001)
+          
 #Combine Data (1 column for GE as response)
   bufo_all<-rbind(bufo_gpl[,c("ge_round","lineage","dose","weight_1")],bufo_cape[,c("ge_round","lineage","dose","weight_1")])
   nrow(bufo_all)
   bufo_all$start_mass_z<-as.numeric(scale(bufo_all$weight_1))
   
 #Full Model   
-bufoall_gemod1<-brm(ge_round ~ lineage * dose + start_mass_z,data=bufo_all,family=negbinomial(),save_pars = save_pars(all=T))
-                summary(bufoall_gemod1)
-                pp_check(bufoall_gemod1)
-  
+# bufoall_gemod1<-brm(ge_round ~ lineage * dose + start_mass_z,data=bufo_all,family=negbinomial(),save_pars = save_pars(all=T))
+#                 summary(bufoall_gemod1)
+#                 pp_check(bufoall_gemod1)
+#   
 #Model Selection                
-        bufoall_gemod1<- add_criterion(bufoall_gemod1, "loo",moment_match=T)
+        #bufoall_gemod1<- add_criterion(bufoall_gemod1, "loo",moment_match=T)
         bufoall_gemod_null<-brm(ge_round ~ 1,data=bufo_all,family=negbinomial(),save_pars = save_pars(all=T))
         bufoall_gemod_null<- add_criterion(bufoall_gemod_null, "loo")
-          print(loo_compare(bufoall_gemod1,bufoall_gemod_null),simplify=F)
+         # print(loo_compare(bufoall_gemod1,bufoall_gemod_null),simplify=F)
         
 
 
 ```
 
+### BUFO NB Model with Shape ~ Treatment 
+```{r}
+
+bufo_g1_nb_bayes_shape <- brm(
+  bf(ge_round ~ lineage * dose + start_mass_z, 
+     shape ~ lineage),
+  data = bufo_all,
+  family = negbinomial(),save_pars = save_pars(all=T)
+)
+
+summary(bufo_g1_nb_bayes_shape)
+bayes_R2(bufo_g1_nb_bayes_shape)
+conditional_effects(bufo_g1_nb_bayes_shape)
+
+#Model Selection 
+  bufo_g1_nb_bayes_shape<-add_criterion(bufo_g1_nb_bayes_shape,"loo",moment_match=TRUE)
+    #gemod_g1_nb_bayes_shape<-reloo(gemod_g1_nb_bayes_shape)
+  print(loo_compare(bufo_g1_nb_bayes_shape,bufoall_gemod_null),simplify=F)
+
+      ## Extract 
+      bufo_ge_shape_conditional<-conditional_effects(bufo_g1_nb_bayes_shape,"dose:lineage")[[1]]
+      bufo_ge_shape_plotdata<-bufo_ge_shape_conditional[,c("dose","lineage","estimate__","lower__","upper__")]
+```
+
 
 ## Gutturalis GPL
 
-```{r}
+```
   gutturalis_gpl$ge_round<-round(gutturalis_gpl$GE)
 #Model
   gutturalis_gpl_mod1<-brm(ge_round ~ Lineage * Dose + start_mass_z,data=gutturalis_gpl,family=negbinomial(),save_pars = save_pars(all=T))
@@ -391,20 +424,13 @@ bufoall_gemod1<-brm(ge_round ~ lineage * dose + start_mass_z,data=bufo_all,famil
     gutturalis_gpl_mod_null<-brm(ge_round ~ 1,data=gutturalis_gpl,family=negbinomial(),save_pars = save_pars(all=T))
     gutturalis_gpl_mod_null<- add_criterion(gutturalis_gpl_mod_null, "loo")
     print(loo_compare(gutturalis_gpl_mod1,gutturalis_gpl_mod_null),simplify=F)
-
-    
-  
 ```
 
 
 ## Gutturalis All
 
-```{r}
-
-
-##### Gutturalis GPL
-
-
+### Original Model Shape Invariant to Pop 
+```
 ##### Gutturalis  All Data 
  #Negative Binomial Fit
      
@@ -414,6 +440,7 @@ bufoall_gemod1<-brm(ge_round ~ lineage * dose + start_mass_z,data=bufo_all,famil
               gemod_g1_nb_bayes<-brm(ge_round ~ Lineage * Dose + start_mass_z,data=gutturalis,family=negbinomial(),save_pars = save_pars(all=T))
                 summary(gemod_g1_nb_bayes)
                 pp_check(gemod_g1_nb_bayes)
+                bayes_R2(gemod_g1_nb_bayes)
                 #conditional_effects(gemod_g1_nb_bayes)
         gemod_g1_nb_bayes<- add_criterion(gemod_g1_nb_bayes, "loo",moment_match=T)
   #loo(gemod_g1_nb_bayes)
@@ -427,9 +454,41 @@ bufoall_gemod1<-brm(ge_round ~ lineage * dose + start_mass_z,data=bufo_all,famil
       
  
       ## Extract 
-        gutturalis_ge_conditional<-conditional_effects(gemod_g1_nb_bayes,"Dose:Lineage")[[1]]
+      gutturalis_ge_conditional<-conditional_effects(gemod_g1_nb_bayes,"Dose:Lineage")[[1]]
        gutturalis_GE_plotdata<-gutturalis_ge_conditional[,c("Dose","Lineage","estimate__","lower__","upper__")]
 
+```
+ 
+### NB Model with Shape ~ Treatment 
+```{r}
+
+#Round GE
+  gutturalis$ge_round<-as.numeric(round(gutturalis$GE))
+ 
+# Main model formula with shape varying by a predictor 
+gemod_g1_nb_bayes_shape <- brm(
+  bf(ge_round ~ Lineage * Dose + start_mass_z, 
+     shape ~ Lineage),
+  data = gutturalis,
+  family = negbinomial(),save_pars = save_pars(all=T)
+)
+
+summary(gemod_g1_nb_bayes_shape)
+bayes_R2(gemod_g1_nb_bayes_shape)
+conditional_effects(gemod_g1_nb_bayes_shape)
+
+#Null
+    gemod_g1_nb_bayes_null<-brm(ge_round ~ 1,data=gutturalis,family=negbinomial(),save_pars = save_pars(all=T))
+    gemod_g1_nb_bayes_null<- add_criterion(gemod_g1_nb_bayes_null, "loo")
+   
+#Model Selection 
+  gemod_g1_nb_bayes_shape<-add_criterion(gemod_g1_nb_bayes_shape,"loo",moment_match=TRUE)
+  #gemod_g1_nb_bayes_shape<-reloo(gemod_g1_nb_bayes_shape)
+  print(loo_compare(gemod_g1_nb_bayes_shape,gemod_g1_nb_bayes_null),simplify=F)
+
+      ## Extract 
+      gutturalis_ge_shape_conditional<-conditional_effects(gemod_g1_nb_bayes_shape,"Dose:Lineage")[[1]]
+      gutturalis_GE_shape_plotdata<-gutturalis_ge_shape_conditional[,c("Dose","Lineage","estimate__","lower__","upper__")]
 ```
 
 ## Combined Infection Load Plot 
@@ -437,15 +496,15 @@ bufoall_gemod1<-brm(ge_round ~ lineage * dose + start_mass_z,data=bufo_all,famil
 ###  Combine Data
 ```{r}
 #Pad Species Names 
-  gutturalis_GE_plotdata$Species<- "S gutturalis"
-  bufo_GE_plotdata$Species<- "B bufo"
+  gutturalis_GE_shape_plotdata$Species<- "S gutturalis"
+  bufo_ge_shape_plotdata$Species<- "B bufo"
   
 #Fix Column Names 
-  colnames(bufo_GE_plotdata)[1:2]<-c("Dose","Lineage")
+  colnames(bufo_ge_shape_plotdata)[1:2]<-c("Dose","Lineage")
 
 
 #Stitch Together  
-  bg_GE_combined<-rbind(bufo_GE_plotdata,gutturalis_GE_plotdata)
+    bg_GE_combined<-rbind(bufo_ge_shape_plotdata,gutturalis_GE_shape_plotdata)
   
 #Sort Lineage Names   
   bg_GE_combined$Lineage<-as.character(bg_GE_combined$Lineage)
@@ -457,7 +516,7 @@ bufoall_gemod1<-brm(ge_round ~ lineage * dose + start_mass_z,data=bufo_all,famil
 #Sort Dose Names     
     table(bg_GE_combined$Dose)
     bg_GE_combined$Species<-as.factor(bg_GE_combined$Species)
-     levels(bg_GE_combined$Species)<-c(expression(paste("European ",italic("B. bufo"))),expression(paste("African ",italic("S. gutturalis"))))
+  levels(bg_GE_combined$Species)<-c(expression(paste("European ",italic("B. bufo"))),expression(paste("African ",italic("S. gutturalis"))))
     
     
     
@@ -499,19 +558,18 @@ bufoall_gemod1<-brm(ge_round ~ lineage * dose + start_mass_z,data=bufo_all,famil
   bg_GE_plot1<-ggplot() 
   
 #Raw Data  
-  bg_GE_plot2<- bg_GE_plot1 + geom_point(data=raw_ge_combined,aes(x=Dose,y=estimate__,fill=Lineage),shape=21,size=3,position = position_jitterdodge(jitter.width = 0.05,seed=12345,dodge.width = 0.5),color="white")
+  bg_GE_plot2<- bg_GE_plot1 + geom_point(data=raw_ge_combined,aes(x=Dose,y=estimate__,fill=Lineage),shape=21,size=3,position = position_jitterdodge(jitter.width = 0.2,seed=12345,dodge.width = 0.5),color="white")
 
   #Add Model Predictions
-    bg_GE_plot3<- bg_GE_plot2   + geom_errorbar(data=bg_GE_combined,aes(x=Dose,ymin=lower__,ymax=upper__,group=Lineage),width=0.3,position = position_dodge(width=0.5)) + geom_point(data=bg_GE_combined,aes(x=Dose,y=estimate__,fill=Lineage),shape=21,size=6,position = position_dodge(width=0.5),color="white") + scale_x_discrete(breaks=c("L","H"),limits=c("L","H"),labels=c("Low","High")) + facet_wrap(.~Species,labeller = label_parsed)
-    
+    bg_GE_plot3<- bg_GE_plot2   + geom_errorbar(data=bg_GE_combined,aes(x=Dose,ymin=lower__,ymax=upper__,group=Lineage),width=0.3,position = position_dodge(width=0.5)) + geom_point(data=bg_GE_combined,aes(x=Dose,y=estimate__,fill=Lineage),shape=23,size=3,position = position_dodge(width=0.5),colour="white",alpha=0.9) + scale_x_discrete(breaks=c("L","H"),limits=c("L","H"),labels=c("Low","High")) + facet_wrap(.~Species,,nrow=2,labeller = label_parsed,scales="free_y") 
     
 ## Add Aesthetics    
       bg_GE_plot4<- bg_GE_plot3 + theme_bw() + labs(x="Dose",y="Infection Load \n (Genomic Equivalents)",fill="Lineage") + plotopts  + scale_fill_brewer(palette = "Set2") + theme(legend.position = "bottom",strip.text.x=element_text(size=16))
 bg_GE_plot4
 
 ## Add Aesthetics, Ignore Model Predictions
-  bg_GE_plot5<- bg_GE_plot4 + theme_bw() + labs(x="Dose",y="Infection Load \n (Genomic Equivalents)",fill="Lineage") + plotopts  + scale_fill_brewer(palette = "Set2") + theme(legend.position = "bottom",strip.text.x=element_text(size=16)) + facet_wrap(.~Species,labeller = label_parsed)
-  bg_GE_plot5
+ # bg_GE_plot5<- bg_GE_plot4 + theme_bw() + labs(x="Dose",y="Infection Load \n (Genomic Equivalents)",fill="Lineage") + plotopts  + scale_fill_brewer(palette = "Set2") + theme(legend.position = "bottom",strip.text.x=element_text(size=16)) + facet_wrap(.~Species,labeller = label_parsed)
+  #bg_GE_plot5
 ```
 
 
@@ -520,13 +578,22 @@ bg_GE_plot4
 
 ```{r}
 library(cowplot)
-infection_combined<-plot_grid(bg_GE_plot5,mort_combined2,nrow=2,labels="AUTO",label_size=20)
+infection_combined<-plot_grid(
+  bg_GE_plot4 + theme(legend.position="none"),
+  mort_combined2+ theme(legend.position="none"),
+  ncol=2,labels="AUTO",label_size=20)
 
+legend <- get_legend(
+  # create some space to the left of the legend
+  mort_combined2 + theme(legend.box.margin = margin(0, 0, 0, 12) )
+)
+
+infection_combined2<-plot_grid(infection_combined,legend,nrow=2,rel_heights=c(3,0.3))
 #dose_combined<-plot_grid(mort_combined2,bg_prev_plot2,bg_GE_plot5,nrow=3,labels="AUTO",label_size = 20)
 #dose_combined
 
-  ggsave2('Infection Sclerophrys Bufo Mar24.pdf',infection_combined,width=22,height=22,units="cm")
-  ggsave2('Infection Sclerophrys Bufo Mar24.tiff',infection_combined,width=22,height=22,units="cm")
+  ggsave2('Infection Sclerophrys Bufo Nov26.pdf',infection_combined2,width=22,height=20,units="cm")
+  ggsave2('Infection Sclerophrys Bufo Nov26.png',infection_combined2,width=22,height=20,units="cm")
 
 ```
 
